@@ -39,7 +39,7 @@ pub async fn auth(
                 })
         });
 
-    let token = token.ok_or_else(|| ApiError::BadRequest("Invalid token".to_owned()))?;
+    let token = token.ok_or_else(|| ApiError::Unauthorized("Token is invalid".to_owned()))?;
 
     let claims = decode::<TokenClaims>(
         &token,

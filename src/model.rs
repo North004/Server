@@ -35,7 +35,29 @@ pub struct Post {
     pub user_id: uuid::Uuid,
     pub title: String,
     pub content: String,
+    #[serde(rename = "createdAt")]
     pub created_at: DateTime<Utc>, // added to match SQL schema
+    #[serde(rename = "updatedAt")]
+    pub updated_at: DateTime<Utc>, // added to match SQL schema
+}
+
+#[allow(non_snake_case)]
+#[derive(Debug, Deserialize, sqlx::FromRow, Serialize, Clone)]
+pub struct AlterdPost {
+    pub id: uuid::Uuid,
+    #[serde(rename = "authorId")]
+    pub user_id: uuid::Uuid,
+    #[serde(rename = "author")]
+    pub username: String,
+    pub title: String,
+    pub content: String,
+    #[serde(rename = "likeCount")]
+    pub like_count: Option<i64>,
+    #[serde(rename = "dislikeCount")]
+    pub dislike_count: Option<i64>,
+    #[serde(rename = "createdAt")]
+    pub created_at: DateTime<Utc>, // added to match SQL schema
+    #[serde(rename = "updatedAt")]
     pub updated_at: DateTime<Utc>, // added to match SQL schema
 }
 

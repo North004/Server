@@ -20,3 +20,8 @@ pub struct CreatePostSchema {
     pub title: String,
     pub content: String,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct LikePostSchema {
+    pub is_like: bool
+}

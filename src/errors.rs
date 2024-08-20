@@ -3,7 +3,6 @@ use axum::http::{StatusCode, Response};
 use axum::body::Body;
 use serde_json::json;
 use serde_json::Value;
-
 pub enum ApiError {
     NotFound(String),
     BadRequest(String),
@@ -24,7 +23,7 @@ impl IntoResponse for ApiError {
         };
 
         let json_response = json!({
-            "status": "error",
+            "status": "Error",
             "message": message,
         });
 

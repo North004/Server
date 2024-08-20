@@ -9,7 +9,7 @@ use axum::{
 use crate::{
     handlers::{
         create_post, get_all_posts, get_all_users, get_profile, login_user_handler, logout_handler,
-        register_user_handler,
+        register_user_handler,react_to_post,is_loggedin
     },
     jwt_auth::auth,
     AppState,
@@ -30,10 +30,14 @@ pub fn create_router(app_state: Arc<AppState>) -> Router {
             "/api/posts/create",
             post(create_post).route_layer(middleware::from_fn_with_state(app_state.clone(), auth)),
         )
+        .route("/api/posts/get_all", get(get_all_posts))
         .route(
-            "/api/posts/get_all",
-            post(get_all_posts)
-                .route_layer(middleware::from_fn_with_state(app_state.clone(), auth)),
+            "/api/posts/:post_id/react",
+            post(react_to_post).route_layer(middleware::from_fn_with_state(app_state.clone(), auth)),
+        )
+        .route(
+            "/api/auth/authenticated",
+            get(is_loggedin).route_layer(middleware::from_fn_with_state(app_state.clone(), auth)),
         )
         .with_state(app_state)
 }

@@ -1,24 +1,25 @@
-use std::sync::Arc;
+use crate::{
+    config::Config,
+    errors::ApiError,
+    model::{AlterdPost, Post, Profile, TokenClaims, User},
+    schema::{CreatePostSchema, LoginUserSchema, RegisterUserSchema,LikePostSchema},
+    AppState,
+    filters::filter_user,
+};
 use argon2::{password_hash::SaltString, Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use axum::{
     extract::{Path, State},
     http::{header, Response, StatusCode},
-    response::IntoResponse,Extension, Json,
+    response::IntoResponse,
+    Extension, Json,
 };
 use axum_extra::extract::cookie::{Cookie, SameSite};
 use jsonwebtoken::{encode, EncodingKey, Header};
 use rand_core::OsRng;
 use serde_json::json;
+use std::sync::Arc;
+use uuid::Uuid;
 use validator::Validate;
-
-use crate::{
-    errors::ApiError,
-    model::{Post, Profile, TokenClaims, User},
-    response::{FilteredUser, PostResponse,ApiResponse,TokenResponse,UserResponse},
-    schema::{CreatePostSchema, LoginUserSchema, RegisterUserSchema},
-    AppState,
-    config::Config
-};
 
 pub async fn logout_handler() -> Result<impl IntoResponse, ApiError> {
     let cookie = Cookie::build(("token", ""))
@@ -26,10 +27,13 @@ pub async fn logout_handler() -> Result<impl IntoResponse, ApiError> {
         .max_age(time::Duration::hours(-1))
         .same_site(SameSite::Lax)
         .http_only(true);
-    let mut response = Response::new(json!({"status": "success"}).to_string());
+    let mut response = Response::new(
+        json!({"status": "Success","message" : "User has been logged out"}).to_string(),
+    );
     response
         .headers_mut()
         .insert(header::SET_COOKIE, cookie.to_string().parse().unwrap());
+
     Ok(response)
 }
 
@@ -37,7 +41,8 @@ pub async fn login_user_handler(
     State(data): State<Arc<AppState>>,
     Json(body): Json<LoginUserSchema>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let user = sqlx::query!(
+    let user: User = sqlx::query_as!(
+        User,
         "SELECT * FROM users WHERE username = $1",
         body.username
     )
@@ -56,7 +61,12 @@ pub async fn login_user_handler(
     if !is_valid {
         return Err(ApiError::BadRequest("Invalid password".to_owned()));
     }
-    let exptime: i64 = data.env.jwt_expires_in.parse().map_err(|e| ApiError::InternalServerError)?;
+
+    let exptime: i64 = data
+        .env
+        .jwt_expires_in
+        .parse()
+        .map_err(|e| ApiError::InternalServerError)?;
 
     let now = chrono::Utc::now();
     let iat = now.timestamp() as usize;
@@ -80,13 +90,13 @@ pub async fn login_user_handler(
         .same_site(SameSite::Lax)
         .http_only(true);
 
-    let token_response =  TokenResponse { token };
-    let json_response: ApiResponse<TokenResponse> = ApiResponse {
-        status: "Success",
-        message: "Jwt Token",
-        data: Some(token_response)
-    };
-    let mut response = Response::new(json!(json_response).to_string());
+    let json_response = json!({
+        "status" : "Success",
+        "message" : "User has been logged in",
+        "user" : filter_user(&user),
+    });
+
+    let mut response = Response::new(json_response.to_string());
     response
         .headers_mut()
         .insert(header::SET_COOKIE, cookie.to_string().parse().unwrap());
@@ -97,16 +107,33 @@ pub async fn register_user_handler(
     State(data): State<Arc<AppState>>,
     Json(body): Json<RegisterUserSchema>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let user_exists: Option<bool> =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)")
-            .bind(body.username.to_owned())
-            .fetch_one(&data.db)
-            .await
-            .map_err(|e| ApiError::InternalServerError)?;
+    let user_exists: Option<bool> = sqlx::query_scalar!(
+        "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)",
+        body.username.to_owned()
+    )
+    .fetch_one(&data.db)
+    .await
+    .map_err(|e| ApiError::InternalServerError)?;
 
     if let Some(exists) = user_exists {
         if exists {
-            return Err(ApiError::BadRequest("Username is taken".to_owned()));
+            return Err(ApiError::BadRequest(
+                "Username is already in use".to_owned(),
+            ));
+        }
+    }
+
+    let email_exists: Option<bool> = sqlx::query_scalar!(
+        "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)",
+        body.email
+    )
+    .fetch_one(&data.db)
+    .await
+    .map_err(|e| ApiError::InternalServerError)?;
+
+    if let Some(exists) = email_exists {
+        if exists {
+            return Err(ApiError::BadRequest("Email is already in use".to_owned()));
         }
     }
 
@@ -120,8 +147,8 @@ pub async fn register_user_handler(
         .map_err(|e| ApiError::InternalServerError)
         .map(|hash| hash.to_string())?;
 
-    let user: User = sqlx::query_as!(User,
-        "INSERT INTO users (username,email,password) VALUES ($1, $2, $3) RETURNING ALL",
+    let user_id: Uuid = sqlx::query_scalar!(
+        "INSERT INTO users (username,email,password) VALUES ($1, $2, $3) RETURNING id",
         body.username.to_string(),
         body.email.to_string().to_ascii_lowercase(),
         hashed_password
@@ -132,7 +159,7 @@ pub async fn register_user_handler(
 
     sqlx::query_as!(Profile,
         "INSERT INTO profiles (user_id, photo, bio) VALUES ($1, $2, $3) RETURNING id, user_id,photo,bio,created_at,updated_at",
-        user.id,
+        user_id,
         "default.png".to_string(),
         "My Bio".to_string(),
     )
@@ -141,18 +168,13 @@ pub async fn register_user_handler(
         ApiError::InternalServerError
     })?;
 
-    let user_response =  ApiResponse {
-        status: "Success",
-        message: "User Created",
-        data: Some(user.username)
-    };
-    
-
-    Ok(Json(user_response))
+    let response = json!({
+        "status" : "Success",
+        "message" : "User has been registerd"
+    });
+    Ok(Json(response))
 }
 
-
-//real function lets check it Checked
 pub async fn create_post(
     Extension(user): Extension<User>,
     State(data): State<Arc<AppState>>,
@@ -168,30 +190,46 @@ pub async fn create_post(
     .await
     .map_err(|e| ApiError::InternalServerError)?;
 
-    let response: ApiResponse<()> = ApiResponse {
-        status: "Success",
-        message: "Post Created",
-        data: None,
-    };
+    let response = json!({
+        "status" : "Success",
+        "message" : "Post has been created"
+    });
 
     Ok(Json(response))
 }
 
-//gets all posts
 pub async fn get_all_posts(
     State(data): State<Arc<AppState>>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let post = sqlx::query_as!(
-        PostResponse,
-        "SELECT posts.title, posts.content, posts.created_at,posts.updated_at,users.username FROM posts JOIN users ON posts.user_id = users.id"
+    let posts: Vec<AlterdPost> = sqlx::query_as!(
+         AlterdPost,
+        "SELECT 
+            posts.id, 
+            users.username, 
+            posts.title, 
+            posts.content, 
+            posts.created_at, 
+            posts.updated_at,
+            users.id AS user_id,
+            COALESCE(SUM(CASE WHEN post_reactions.is_like = TRUE THEN 1 ELSE 0 END), 0) AS like_count,
+            COALESCE(SUM(CASE WHEN post_reactions.is_like = FALSE THEN 1 ELSE 0 END), 0) AS dislike_count
+        FROM posts
+        JOIN users ON posts.user_id = users.id
+        LEFT JOIN post_reactions ON posts.id = post_reactions.post_id
+        GROUP BY posts.id, users.username, posts.title, posts.content, posts.created_at, posts.updated_at, users.id"
     )
     .fetch_all(&data.db)
     .await
     .map_err(|e| ApiError::InternalServerError)?;
-    Ok(Json(post))
+
+    let response = json!({
+        "status" : "Success",
+        "message" : "All posts retrived",
+        "posts" : posts
+    });
+    Ok(Json(response))
 }
 
-//function has been checked
 pub async fn get_profile(
     Path(username): Path<String>,
     State(data): State<Arc<AppState>>,
@@ -229,17 +267,14 @@ pub async fn get_profile(
         }
     };
 
-    let response = ApiResponse {
-        status: "Success",
-        message: "Returns User Profile",
-        data: Some(profile)
-    };
-
+    let response = json!({
+        "status" : "Success",
+        "message" : "Profile retrived",
+        "profile": profile
+    });
     Ok(Json(response))
 }
 
-
-//test function
 pub async fn get_all_users(
     State(data): State<Arc<AppState>>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -247,10 +282,80 @@ pub async fn get_all_users(
         .fetch_all(&data.db)
         .await
         .map_err(|e| ApiError::InternalServerError)?;
-    let response = ApiResponse {
-        status: "Success",
-        message: "Returns User Profile",
-        data: Some(users)
-    };
+
+    let response = json!({
+        "status" : "Success",
+        "message" : "all users retrived",
+        "users" : users
+    });
+
     Ok(Json(response))
+}
+
+pub async fn react_to_post(
+    State(data): State<Arc<AppState>>,
+    Extension(user): Extension<User>,
+    Path(post_id): Path<Uuid>,
+    Json(is_like): Json<LikePostSchema>,
+) -> Result<impl IntoResponse, ApiError> {
+    let existing_reaction = sqlx::query!(
+        "SELECT id FROM post_reactions WHERE post_id = $1 AND user_id = $2",
+        post_id,
+        user.id
+    )
+    .fetch_optional(&data.db)
+    .await
+    .map_err(|e| ApiError::InternalServerError)?;
+
+    if let Some(reaction) = existing_reaction {
+         // Update the existing reaction
+         sqlx::query!(
+            "UPDATE post_reactions SET is_like = $1 WHERE id = $2",
+            is_like.is_like,
+            reaction.id
+        )
+        .execute(&data.db)
+        .await
+        .map_err(|_| ApiError::InternalServerError)?;
+    }
+    else {
+        // Insert a new reaction
+        sqlx::query!(
+            "INSERT INTO post_reactions (post_id, user_id, is_like) VALUES ($1, $2, $3)",
+            post_id,
+            user.id,
+            is_like.is_like
+        )
+        .execute(&data.db)
+        .await
+        .map_err(|_| ApiError::InternalServerError)?;
+    }
+   
+    let counts = sqlx::query!(
+        "SELECT 
+            COALESCE(SUM(CASE WHEN is_like = TRUE THEN 1 ELSE 0 END), 0) AS like_count,
+            COALESCE(SUM(CASE WHEN is_like = FALSE THEN 1 ELSE 0 END), 0) AS dislike_count
+        FROM post_reactions
+        WHERE post_id = $1",
+        post_id
+    )
+    .fetch_one(&data.db)
+    .await
+    .map_err(|_| ApiError::NotFound("Error sorry".to_owned()))?;
+
+    let response = json!({
+        "status": "Success",
+        "message": "Reaction recorded",
+        "post" : json!({
+                "postId": post_id,
+                "likeCount" : counts.like_count,
+                "dislikeCount" : counts.dislike_count,
+        })
+    });
+    Ok(Json(response))
+}
+
+
+pub async fn is_loggedin(Extension(user): Extension<User>,) -> Result<impl IntoResponse,ApiError> {
+    Ok(StatusCode::OK)
 }
