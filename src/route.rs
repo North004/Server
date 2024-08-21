@@ -36,7 +36,7 @@ pub fn create_router(app_state: Arc<AppState>) -> Router {
             post(react_to_post).route_layer(middleware::from_fn_with_state(app_state.clone(), auth)),
         )
         .route(
-            "/api/auth/authenticated",
+            "/api/auth/is_authenticated",
             get(is_loggedin).route_layer(middleware::from_fn_with_state(app_state.clone(), auth)),
         )
         .with_state(app_state)

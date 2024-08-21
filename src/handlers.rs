@@ -17,7 +17,7 @@ use axum_extra::extract::cookie::{Cookie, SameSite};
 use jsonwebtoken::{encode, EncodingKey, Header};
 use rand_core::OsRng;
 use serde_json::json;
-use std::sync::Arc;
+use std::sync::Arc; 
 use uuid::Uuid;
 use validator::Validate;
 
@@ -49,7 +49,7 @@ pub async fn login_user_handler(
     .fetch_optional(&data.db)
     .await
     .map_err(|e| ApiError::InternalServerError)?
-    .ok_or_else(|| ApiError::BadRequest("User does not exist".to_owned()))?;
+    .ok_or_else(|| ApiError::BadRequest("No user exists with this name".to_owned()))?;
 
     let is_valid = match PasswordHash::new(&user.password) {
         Ok(parsed_hash) => Argon2::default()
@@ -59,7 +59,7 @@ pub async fn login_user_handler(
     };
 
     if !is_valid {
-        return Err(ApiError::BadRequest("Invalid password".to_owned()));
+        return Err(ApiError::BadRequest("Incorrect password".to_owned()));
     }
 
     let exptime: i64 = data
@@ -118,7 +118,7 @@ pub async fn register_user_handler(
     if let Some(exists) = user_exists {
         if exists {
             return Err(ApiError::BadRequest(
-                "Username is already in use".to_owned(),
+                "Username already exists".to_owned(),
             ));
         }
     }
@@ -216,7 +216,8 @@ pub async fn get_all_posts(
         FROM posts
         JOIN users ON posts.user_id = users.id
         LEFT JOIN post_reactions ON posts.id = post_reactions.post_id
-        GROUP BY posts.id, users.username, posts.title, posts.content, posts.created_at, posts.updated_at, users.id"
+        GROUP BY posts.id, users.username, posts.title, posts.content, posts.created_at, posts.updated_at, users.id
+        ORDER BY posts.created_at DESC"
     )
     .fetch_all(&data.db)
     .await
