@@ -1,25 +1,22 @@
-#![allow(unused, dead_code)]
-
 mod config;
 mod errors;
+mod filters;
 mod handlers;
 mod jwt_auth;
 mod model;
 mod route;
 mod schema;
-mod filters;
-use config::Config;
-use std::sync::Arc;
 
 use axum::http::{
     header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE},
     HeaderValue, Method,
 };
+use config::Config;
 use dotenv::dotenv;
 use route::create_router;
-use tower_http::cors::CorsLayer;
-
 use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
+use std::sync::Arc;
+use tower_http::cors::CorsLayer;
 
 pub struct AppState {
     db: Pool<Postgres>,
@@ -47,8 +44,9 @@ async fn main() {
         }
     };
 
+
     let cors = CorsLayer::new()
-        .allow_origin("http://localhost:3000".parse::<HeaderValue>().unwrap())
+        .allow_origin("http://localhost:5173".parse::<HeaderValue>().unwrap())
         .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
         .allow_credentials(true)
         .allow_headers([AUTHORIZATION, ACCEPT, CONTENT_TYPE]);

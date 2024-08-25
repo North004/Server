@@ -3,4 +3,3 @@ target/
 
 # Ignore IDE-specific files
 .vscode/
-.idea/

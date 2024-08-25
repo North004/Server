@@ -1,6 +1,5 @@
-use crate::model::{User};
+use crate::model::User;
 use serde::{Deserialize,Serialize};
-use chrono::{DateTime,Utc};
 
 #[allow(non_snake_case)]
 #[derive(Deserialize, Serialize, Clone)]

@@ -2,14 +2,12 @@ use std::sync::Arc;
 use axum::{
     body::Body,
     extract::State,
-    http::{header, Request, StatusCode},
+    http::{header, Request},
     middleware::Next,
     response::IntoResponse,
-    Json,
 };
 use axum_extra::extract::cookie::CookieJar;
 use jsonwebtoken::{decode, DecodingKey, Validation};
-use serde::Serialize;
 
 use crate::{
     errors::ApiError,
@@ -55,7 +53,7 @@ pub async fn auth(
     let user = sqlx::query_as!(User, "SELECT * FROM users WHERE id = $1", user_id)
         .fetch_optional(&data.db)
         .await
-        .map_err(|e| ApiError::InternalServerError)?;
+        .map_err(|_| ApiError::InternalServerError)?;
 
     let user =
         user.ok_or_else(|| return ApiError::BadRequest("User no longer exists".to_owned()))?;

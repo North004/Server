@@ -1,7 +1,5 @@
-use chrono::prelude::*;
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime,Utc};
 use serde::{Deserialize, Serialize};
-use validator::{Validate, ValidationError};
 
 #[allow(non_snake_case)]
 #[derive(Debug, Deserialize, sqlx::FromRow, Serialize, Clone)]
@@ -59,6 +57,8 @@ pub struct AlterdPost {
     pub created_at: DateTime<Utc>, // added to match SQL schema
     #[serde(rename = "updatedAt")]
     pub updated_at: DateTime<Utc>, // added to match SQL schema
+    #[serde(rename = "isOwner")]
+    pub is_owner: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
