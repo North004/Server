@@ -11,13 +11,12 @@ CREATE TABLE users (
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
 );
 
-CREATE INDEX display_username_idx ON users (username);
+CREATE INDEX user_username_idx ON users (username);
 
--- Profiles table with additional profile information
 CREATE TABLE profiles (
         id UUID NOT NULL PRIMARY KEY DEFAULT (uuid_generate_v4()),
         user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
-        photo VARCHAR DEFAULT 'default.png',
+        photo VARCHAR NOT NULL DEFAULT 'default.png',
         bio TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
@@ -26,14 +25,14 @@ CREATE TABLE profiles (
 
 CREATE TABLE posts (
         id UUID NOT NULL PRIMARY KEY DEFAULT (uuid_generate_v4()),
-        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        author_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         title VARCHAR(50) NOT NULL,
-        content VARCHAR(255) NOT NULL,
+        content VARCHAR(400) NOT NULL,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
 );
 
-CREATE INDEX title_idx ON posts(title);
+CREATE INDEX posts_title_idx ON posts(title);
 
 CREATE TABLE post_reactions (
     id UUID NOT NULL PRIMARY KEY DEFAULT (uuid_generate_v4()),

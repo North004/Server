@@ -1,48 +1,41 @@
-use std::sync::Arc;
-
-use axum::{ middleware, routing::{ get, post, delete }, Router };
-
 use crate::{
     handlers::{
-        create_post,
-        get_all_posts,
-        get_all_users,
-        get_profile,
-        login_user_handler,
-        logout_handler,
-        react_to_post,
-        register_user_handler,
-        delete_post,
+        create_post, delete_post, get_all_posts, get_all_users, get_profile, is_logged_in,
+        login_user_handler, logout_handler, react_to_post, register_user_handler,
     },
-    jwt_auth::auth,
+    session_auth::auth,
     AppState,
 };
+use axum::{
+    middleware,
+    routing::{delete, get, post},
+    Router,
+};
+use std::sync::Arc;
 
 pub fn create_router(app_state: Arc<AppState>) -> Router {
+    // Define the protected routes
+    let protected_routes = Router::new()
+        .route("/post", post(create_post))
+        .route("/post/:post_id", delete(delete_post))
+        .route("/post/:post_id/react", post(react_to_post))
+        .route("/auth/logout", get(logout_handler))
+        .route("/auth/is_logged_in", get(is_logged_in));
+
+    // Define the unprotected routes
+    let unprotected_routes = Router::new()
+        .route("/user/:username", get(get_profile))
+        .route("/user/get_all", get(get_all_users))
+        .route("/post/get_all", get(get_all_posts))
+        .route("/auth/login", post(login_user_handler))
+        .route("/auth/register", post(register_user_handler));
+
+    // Apply the middleware layer to protected routes
+    let protected_routes_with_auth =
+        protected_routes.layer(middleware::from_fn_with_state(app_state.clone(), auth));
+
     Router::new()
-        .route("/api/auth/register", post(register_user_handler))
-        .route("/api/auth/login", post(login_user_handler))
-        .route("/api/users/:username", get(get_profile))
-        .route(
-            "/api/auth/logout",
-            get(logout_handler).route_layer(middleware::from_fn_with_state(app_state.clone(), auth))
-        )
-        .route("/api/users/get_all", get(get_all_users))
-        .route(
-            "/api/posts",
-            post(create_post).route_layer(middleware::from_fn_with_state(app_state.clone(), auth))
-        )
-        .route(
-            "/api/posts/:post_id",
-            delete(delete_post).route_layer(middleware::from_fn_with_state(app_state.clone(), auth))
-        )
-        .route(
-            "/api/posts/get_all",
-            get(get_all_posts).route_layer(middleware::from_fn_with_state(app_state.clone(), auth))
-        )
-        .route(
-            "/api/posts/:post_id/react",
-            post(react_to_post).route_layer(middleware::from_fn_with_state(app_state.clone(), auth))
-        )
+        .merge(protected_routes_with_auth)
+        .merge(unprotected_routes)
         .with_state(app_state)
 }

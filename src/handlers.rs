@@ -1,54 +1,39 @@
 use crate::{
     errors::ApiError,
-    filters::filter_user,
-    model::{AlterdPost, Profile, TokenClaims, User},
+    model::{Profile, Register, User},
+    response::PostResponse,
     schema::{CreatePostSchema, LikePostSchema, LoginUserSchema, RegisterUserSchema},
     AppState,
 };
-use argon2::{password_hash::SaltString, Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
+use argon2::{
+    password_hash::{rand_core::OsRng, SaltString},
+    Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
+};
 use axum::{
     extract::{Path, State},
-    http::{header, Response},
     response::IntoResponse,
     Extension, Json,
 };
-use axum_extra::extract::cookie::{Cookie, SameSite};
-use jsonwebtoken::{encode, EncodingKey, Header};
-use rand_core::OsRng;
 use serde_json::json;
 use std::sync::Arc;
+use tower_sessions::Session;
 use uuid::Uuid;
 use validator::Validate;
 
-pub async fn logout_handler() -> Result<impl IntoResponse, ApiError> {
-    let cookie = Cookie::build(("token", ""))
-        .path("/")
-        .max_age(time::Duration::hours(-1))
-        .same_site(SameSite::Lax)
-        .http_only(true);
-    let mut response = Response::new(
-        json!({"status": "Success","message" : "User has been logged out"}).to_string(),
-    );
-    response
-        .headers_mut()
-        .insert(header::SET_COOKIE, cookie.to_string().parse().unwrap());
-
-    Ok(response)
-}
-
 pub async fn login_user_handler(
+    session: Session,
     State(data): State<Arc<AppState>>,
     Json(body): Json<LoginUserSchema>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let user: User = sqlx::query_as!(
-        User,
-        "SELECT * FROM users WHERE username = $1",
+    let user: Register = sqlx::query_as!(
+        Register,
+        "SELECT (id), (password) FROM users WHERE username = ($1)",
         body.username
     )
     .fetch_optional(&data.db)
     .await
     .map_err(|_| ApiError::InternalServerError)?
-    .ok_or_else(|| ApiError::BadRequest("No user exists with this name".to_owned()))?;
+    .ok_or_else(|| ApiError::BadRequest("user does not exist".to_string()))?;
 
     let is_valid = match PasswordHash::new(&user.password) {
         Ok(parsed_hash) => Argon2::default()
@@ -58,48 +43,29 @@ pub async fn login_user_handler(
     };
 
     if !is_valid {
-        return Err(ApiError::BadRequest("Incorrect password".to_owned()));
+        return Err(ApiError::BadRequest("password incorrect".to_string()));
     }
 
-    let exptime: i64 = data
-        .env
-        .jwt_expires_in
-        .parse()
+    session
+        .insert("user_id", user.id)
+        .await
         .map_err(|_| ApiError::InternalServerError)?;
 
-    let now = chrono::Utc::now();
-    let iat = now.timestamp() as usize;
-    let exp = (now + chrono::Duration::minutes(exptime)).timestamp() as usize;
-    let claims: TokenClaims = TokenClaims {
-        sub: user.id.to_string(),
-        exp,
-        iat,
-    };
-
-    let token = encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(data.env.jwt_secret.as_ref()),
-    )
-    .unwrap();
-
-    let cookie = Cookie::build(("token", token.to_owned()))
-        .path("/")
-        .max_age(time::Duration::minutes(exptime))
-        .same_site(SameSite::Lax)
-        .http_only(true);
-
-    let json_response = json!({
-        "status" : "Success",
-        "message" : "User has been logged in",
-        "user" : filter_user(&user),
+    let response = json!({
+        "status" : "success",
+        "message" : "user logged in"
     });
 
-    let mut response = Response::new(json_response.to_string());
-    response
-        .headers_mut()
-        .insert(header::SET_COOKIE, cookie.to_string().parse().unwrap());
-    Ok(response)
+    Ok(Json(response))
+}
+
+pub async fn logout_handler(session: Session) -> Result<impl IntoResponse, ApiError> {
+    session
+        .delete()
+        .await
+        .map_err(|_| ApiError::InternalServerError)?;
+    let response = json!({"status": "success","message" : "user logged out"});
+    Ok(Json(response))
 }
 
 pub async fn register_user_handler(
@@ -116,7 +82,7 @@ pub async fn register_user_handler(
 
     if let Some(exists) = user_exists {
         if exists {
-            return Err(ApiError::BadRequest("Username already exists".to_owned()));
+            return Err(ApiError::BadRequest("username is taken".to_string()));
         }
     }
 
@@ -130,12 +96,12 @@ pub async fn register_user_handler(
 
     if let Some(exists) = email_exists {
         if exists {
-            return Err(ApiError::BadRequest("Email is already in use".to_owned()));
+            return Err(ApiError::BadRequest("email is taken".to_string()));
         }
     }
 
     if let Err(_) = body.validate() {
-        return Err(ApiError::BadRequest("Email is invalid".to_owned()));
+        return Err(ApiError::BadRequest("invalid email".to_string()));
     }
 
     let salt = SaltString::generate(&mut OsRng);
@@ -143,6 +109,12 @@ pub async fn register_user_handler(
         .hash_password(body.password.as_bytes(), &salt)
         .map_err(|_| ApiError::InternalServerError)
         .map(|hash| hash.to_string())?;
+
+    let tx = data
+        .db
+        .begin()
+        .await
+        .map_err(|_| ApiError::InternalServerError)?;
 
     let user_id: Uuid = sqlx::query_scalar!(
         "INSERT INTO users (username,email,password) VALUES ($1, $2, $3) RETURNING id",
@@ -154,20 +126,22 @@ pub async fn register_user_handler(
     .await
     .map_err(|_| ApiError::InternalServerError)?;
 
-    sqlx::query_as!(Profile,
-        "INSERT INTO profiles (user_id, photo, bio) VALUES ($1, $2, $3) RETURNING id, user_id,photo,bio,created_at,updated_at",
+    sqlx::query!("INSERT INTO profiles (user_id, photo, bio) VALUES ($1, $2, $3) RETURNING id, user_id,photo,bio,created_at,updated_at",
         user_id,
-        "default.png".to_string(),
-        "My Bio".to_string(),
+        "default.jpg".to_string(),
+        "".to_string(),
     )
     .fetch_one(&data.db)
     .await.map_err(|_| {
         ApiError::InternalServerError
     })?;
 
+    tx.commit()
+        .await
+        .map_err(|_| ApiError::InternalServerError)?;
     let response = json!({
-        "status" : "Success",
-        "message" : "User has been registerd"
+        "status" : "success",
+        "message": "user registerd"
     });
     Ok(Json(response))
 }
@@ -178,7 +152,7 @@ pub async fn create_post(
     Json(post): Json<CreatePostSchema>,
 ) -> Result<impl IntoResponse, ApiError> {
     sqlx::query!(
-        "INSERT INTO posts (user_id,title,content) VALUES ($1,$2,$3)",
+        "INSERT INTO posts (author_id,title,content) VALUES ($1,$2,$3)",
         user.id,
         post.title,
         post.content
@@ -188,45 +162,43 @@ pub async fn create_post(
     .map_err(|_| ApiError::InternalServerError)?;
 
     let response = json!({
-        "status" : "Success",
-        "message" : "Post has been created"
+        "status" : "success",
+        "message" : "post created"
     });
 
     Ok(Json(response))
 }
 
 pub async fn get_all_posts(
-    Extension(user): Extension<User>,
     State(data): State<Arc<AppState>>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let mut posts: Vec<AlterdPost> = sqlx::query_as!(
-         AlterdPost,
+    let posts: Vec<PostResponse> = sqlx::query_as!(
+         PostResponse,
         "SELECT 
-            posts.id, 
-            users.username, 
+            posts.id AS post_id, 
+            users.username AS author, 
             posts.title, 
-            posts.content, 
+            posts.content,  
             posts.created_at, 
             posts.updated_at,
-            users.id AS user_id,
-            false AS is_owner,
+            posts.author_id,
+            profiles.photo AS author_pfp,
             COALESCE(SUM(CASE WHEN post_reactions.is_like = TRUE THEN 1 ELSE 0 END), 0) AS like_count,
             COALESCE(SUM(CASE WHEN post_reactions.is_like = FALSE THEN 1 ELSE 0 END), 0) AS dislike_count
         FROM posts
-        JOIN users ON posts.user_id = users.id
+        JOIN users ON posts.author_id = users.id
+        JOIN profiles ON profiles.user_id = users.id
         LEFT JOIN post_reactions ON posts.id = post_reactions.post_id
-        GROUP BY posts.id, users.username, posts.title, posts.content, posts.created_at, posts.updated_at, users.id
+        GROUP BY posts.id, users.username, posts.title, posts.content, posts.created_at, posts.updated_at, users.id, profiles.photo
         ORDER BY posts.created_at DESC"
     )
     .fetch_all(&data.db)
     .await
     .map_err(|_| ApiError::InternalServerError)?;
 
-    posts.iter_mut().for_each(|x| x.is_owner =  Some(user.id == x.user_id));
-
     let response = json!({
-        "status" : "Success",
-        "message" : "All posts retrived",
+        "status" : "success",
+        "message" : "all posts retrived",
         "posts" : posts
     });
     Ok(Json(response))
@@ -246,8 +218,8 @@ pub async fn get_profile(
     // If user is not found, return 404 Not Found
     let user_id = match user_id {
         Some(id) => id,
-        None => {
-            return Err(ApiError::NotFound("User Not Found".to_owned()));
+        _ => {
+            return Err(ApiError::NotFound("user not found".to_string()));
         }
     };
 
@@ -265,13 +237,13 @@ pub async fn get_profile(
     let profile = match profile {
         Some(profile) => profile,
         None => {
-            return Err(ApiError::NotFound("Profile Not Found".to_owned()));
+            return Err(ApiError::NotFound("profile not found".to_string()));
         }
     };
 
     let response = json!({
-        "status" : "Success",
-        "message" : "Profile retrived",
+        "status" : "success",
+        "message" : "profile retrived",
         "profile": profile
     });
     Ok(Json(response))
@@ -342,11 +314,11 @@ pub async fn react_to_post(
     )
     .fetch_one(&data.db)
     .await
-    .map_err(|_| ApiError::NotFound("Error sorry".to_owned()))?;
+    .map_err(|_| ApiError::InternalServerError)?;
 
     let response = json!({
         "status": "Success",
-        "message": "Reaction recorded",
+        "message": "reaction recorded",
         "post" : json!({
                 "postId": post_id,
                 "likeCount" : counts.like_count,
@@ -356,22 +328,36 @@ pub async fn react_to_post(
     Ok(Json(response))
 }
 
-
 pub async fn delete_post(
     Extension(user): Extension<User>,
     State(data): State<Arc<AppState>>,
     Path(post_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let post_uuid = sqlx::query_scalar!("SELECT user_id FROM posts WHERE id = $1",post_id).fetch_one(&data.db).await.map_err(|_| ApiError::InternalServerError)?;
+    let post_uuid = sqlx::query_scalar!("SELECT author_id FROM posts WHERE id = $1", post_id)
+        .fetch_one(&data.db)
+        .await
+        .map_err(|_| ApiError::InternalServerError)?;
     if user.id != post_uuid {
-        return Err(ApiError::Unauthorized("Did you just try to delete someone elses post.... lol failed".to_string()))
+        return Err(ApiError::Unauthorized(
+            "not authorized to delete post".to_string(),
+        ));
     }
-    sqlx::query!("DELETE FROM posts WHERE id = $1",post_id).execute(&data.db).await.map_err(|_| ApiError::InternalServerError)?;
+    sqlx::query!("DELETE FROM posts WHERE id = $1", post_id)
+        .execute(&data.db)
+        .await
+        .map_err(|_| ApiError::InternalServerError)?;
 
     let response = json!({
-        "status" : "Success",
-        "message" : "Post has been deleted"
+        "status" : "success",
+        "message" : "post deleted"
     });
 
+    Ok(Json(response))
+}
+
+pub async fn is_logged_in() -> Result<impl IntoResponse, ApiError> {
+    let response = json!({
+       "is_logged_in": true
+    });
     Ok(Json(response))
 }

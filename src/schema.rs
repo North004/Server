@@ -23,5 +23,5 @@ pub struct CreatePostSchema {
 
 #[derive(Debug, Deserialize)]
 pub struct LikePostSchema {
-    pub is_like: bool
+    pub is_like: bool,
 }
