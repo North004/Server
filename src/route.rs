@@ -19,8 +19,8 @@ pub fn create_router(app_state: Arc<AppState>) -> Router {
         .route("/post", post(create_post))
         .route("/post/:post_id", delete(delete_post))
         .route("/post/:post_id/react", post(react_to_post))
-        .route("/auth/logout", get(logout_handler))
-        .route("/auth/is_logged_in", get(is_logged_in));
+        .route("/auth/logout", post(logout_handler))
+        .route("/auth/is_logged_in", post(is_logged_in));
 
     // Define the unprotected routes
     let unprotected_routes = Router::new()

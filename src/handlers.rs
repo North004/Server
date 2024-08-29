@@ -2,6 +2,7 @@ use crate::{
     errors::ApiError,
     model::{Profile, Register, User},
     response::PostResponse,
+    response::{GeneralResponse, Status},
     schema::{CreatePostSchema, LikePostSchema, LoginUserSchema, RegisterUserSchema},
     AppState,
 };
@@ -15,11 +16,11 @@ use axum::{
     Extension, Json,
 };
 use serde_json::json;
+use serde_json::Value;
 use std::sync::Arc;
 use tower_sessions::Session;
 use uuid::Uuid;
 use validator::Validate;
-
 pub async fn login_user_handler(
     session: Session,
     State(data): State<Arc<AppState>>,
@@ -33,7 +34,7 @@ pub async fn login_user_handler(
     .fetch_optional(&data.db)
     .await
     .map_err(|_| ApiError::InternalServerError)?
-    .ok_or_else(|| ApiError::BadRequest("user does not exist".to_string()))?;
+    .ok_or_else(|| ApiError::BadRequest("User does not exist".to_string()))?;
 
     let is_valid = match PasswordHash::new(&user.password) {
         Ok(parsed_hash) => Argon2::default()
@@ -43,7 +44,7 @@ pub async fn login_user_handler(
     };
 
     if !is_valid {
-        return Err(ApiError::BadRequest("password incorrect".to_string()));
+        return Err(ApiError::BadRequest("Password incorrect".to_string()));
     }
 
     session
@@ -51,10 +52,11 @@ pub async fn login_user_handler(
         .await
         .map_err(|_| ApiError::InternalServerError)?;
 
-    let response = json!({
-        "status" : "success",
-        "message" : "user logged in"
-    });
+    let response: GeneralResponse<()> = GeneralResponse {
+        status: Status::Success,
+        message: "User logged in".to_string(),
+        data: None,
+    };
 
     Ok(Json(response))
 }
@@ -64,7 +66,11 @@ pub async fn logout_handler(session: Session) -> Result<impl IntoResponse, ApiEr
         .delete()
         .await
         .map_err(|_| ApiError::InternalServerError)?;
-    let response = json!({"status": "success","message" : "user logged out"});
+    let response: GeneralResponse<()> = GeneralResponse {
+        status: Status::Success,
+        message: "User logged out".to_string(),
+        data: None,
+    };
     Ok(Json(response))
 }
 
@@ -82,7 +88,7 @@ pub async fn register_user_handler(
 
     if let Some(exists) = user_exists {
         if exists {
-            return Err(ApiError::BadRequest("username is taken".to_string()));
+            return Err(ApiError::BadRequest("Username is taken".to_string()));
         }
     }
 
@@ -96,12 +102,12 @@ pub async fn register_user_handler(
 
     if let Some(exists) = email_exists {
         if exists {
-            return Err(ApiError::BadRequest("email is taken".to_string()));
+            return Err(ApiError::BadRequest("Email is taken".to_string()));
         }
     }
 
     if let Err(_) = body.validate() {
-        return Err(ApiError::BadRequest("invalid email".to_string()));
+        return Err(ApiError::BadRequest("Invalid email".to_string()));
     }
 
     let salt = SaltString::generate(&mut OsRng);
@@ -139,10 +145,12 @@ pub async fn register_user_handler(
     tx.commit()
         .await
         .map_err(|_| ApiError::InternalServerError)?;
-    let response = json!({
-        "status" : "success",
-        "message": "user registerd"
-    });
+
+    let response: GeneralResponse<()> = GeneralResponse {
+        status: Status::Success,
+        message: "User registerd".to_string(),
+        data: None,
+    };
     Ok(Json(response))
 }
 
@@ -161,10 +169,11 @@ pub async fn create_post(
     .await
     .map_err(|_| ApiError::InternalServerError)?;
 
-    let response = json!({
-        "status" : "success",
-        "message" : "post created"
-    });
+    let response: GeneralResponse<()> = GeneralResponse {
+        status: Status::Success,
+        message: "Post created".to_string(),
+        data: None,
+    };
 
     Ok(Json(response))
 }
@@ -196,11 +205,11 @@ pub async fn get_all_posts(
     .await
     .map_err(|_| ApiError::InternalServerError)?;
 
-    let response = json!({
-        "status" : "success",
-        "message" : "all posts retrived",
-        "posts" : posts
-    });
+    let response: GeneralResponse<Vec<PostResponse>> = GeneralResponse {
+        status: Status::Success,
+        message: "All posts retrived".to_string(),
+        data: Some(posts),
+    };
     Ok(Json(response))
 }
 
@@ -219,7 +228,7 @@ pub async fn get_profile(
     let user_id = match user_id {
         Some(id) => id,
         _ => {
-            return Err(ApiError::NotFound("user not found".to_string()));
+            return Err(ApiError::NotFound("User not found".to_string()));
         }
     };
 
@@ -237,15 +246,15 @@ pub async fn get_profile(
     let profile = match profile {
         Some(profile) => profile,
         None => {
-            return Err(ApiError::NotFound("profile not found".to_string()));
+            return Err(ApiError::NotFound("Profile not found".to_string()));
         }
     };
 
-    let response = json!({
-        "status" : "success",
-        "message" : "profile retrived",
-        "profile": profile
-    });
+    let response: GeneralResponse<Profile> = GeneralResponse {
+        status: Status::Success,
+        message: "Profile retrived".to_string(),
+        data: Some(profile),
+    };
     Ok(Json(response))
 }
 
@@ -257,11 +266,11 @@ pub async fn get_all_users(
         .await
         .map_err(|_| ApiError::InternalServerError)?;
 
-    let response = json!({
-        "status" : "Success",
-        "message" : "all users retrived",
-        "users" : users
-    });
+    let response: GeneralResponse<Vec<User>> = GeneralResponse {
+        status: Status::Success,
+        message: "All users retrived".to_string(),
+        data: Some(users),
+    };
 
     Ok(Json(response))
 }
@@ -316,15 +325,15 @@ pub async fn react_to_post(
     .await
     .map_err(|_| ApiError::InternalServerError)?;
 
-    let response = json!({
-        "status": "Success",
-        "message": "reaction recorded",
-        "post" : json!({
-                "postId": post_id,
-                "likeCount" : counts.like_count,
-                "dislikeCount" : counts.dislike_count,
-        })
-    });
+    let response: GeneralResponse<Value> = GeneralResponse {
+        status: Status::Success,
+        message: "Reaction Recorded".to_string(),
+        data: Some(json!({
+                "post_id": post_id,
+                "like_count" : counts.like_count,
+                "dislike_count" : counts.dislike_count,
+        })),
+    };
     Ok(Json(response))
 }
 
@@ -347,17 +356,22 @@ pub async fn delete_post(
         .await
         .map_err(|_| ApiError::InternalServerError)?;
 
-    let response = json!({
-        "status" : "success",
-        "message" : "post deleted"
-    });
+    let response: GeneralResponse<()> = GeneralResponse {
+        status: Status::Success,
+        message: "Post delleted".to_string(),
+        data: None,
+    };
 
     Ok(Json(response))
 }
 
 pub async fn is_logged_in() -> Result<impl IntoResponse, ApiError> {
-    let response = json!({
-       "is_logged_in": true
-    });
+    let response: GeneralResponse<Value> = GeneralResponse {
+        status: Status::Success,
+        message: "User logged in".to_string(),
+        data: Some(json!({
+            "is_logged_in": true,
+        })),
+    };
     Ok(Json(response))
 }

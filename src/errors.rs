@@ -1,8 +1,8 @@
-use axum::response::IntoResponse;
-use axum::http::{StatusCode, Response};
+use crate::response::{GeneralResponse, Status};
 use axum::body::Body;
+use axum::http::{Response, StatusCode};
+use axum::response::IntoResponse;
 use serde_json::json;
-
 pub enum ApiError {
     NotFound(String),
     BadRequest(String),
@@ -22,11 +22,13 @@ impl IntoResponse for ApiError {
             ),
         };
 
-        let json_response = json!({
-            "status": "Error",
-            "message": message,
-        });
+        let response = GeneralResponse::<()> {
+            status: Status::Success,
+            message,
+            data: None,
+        };
 
+        let json_response = json!(response);
         Response::builder()
             .status(status)
             .header("Content-Type", "application/json")
