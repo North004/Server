@@ -1,4 +1,6 @@
-use crate::{errors::ApiError, model::User, AppState};
+use crate::model::User;
+use crate::response::ApiError;
+use crate::AppState;
 use axum::{
     body::Body,
     extract::{Request, State},
@@ -25,11 +27,11 @@ pub async fn auth(
             .await
             .map_err(|_| ApiError::InternalServerError)?;
 
-        let user = user.ok_or_else(|| ApiError::Unauthorized("user unauthorized 1".to_string()))?;
+        let user = user.ok_or_else(|| ApiError::Fail("user unauthorized".to_string()))?;
 
         req.extensions_mut().insert(user);
         Ok(next.run(req).await)
     } else {
-        Err(ApiError::Unauthorized("user unathorized 2".to_string()))
+        Err(ApiError::Fail("user unathorized".to_string()))
     }
 }

@@ -3,6 +3,7 @@ use axum::body::Body;
 use axum::http::{Response, StatusCode};
 use axum::response::IntoResponse;
 use serde_json::json;
+
 pub enum ApiError {
     NotFound(String),
     BadRequest(String),

@@ -1,8 +1,6 @@
 use crate::{
-    errors::ApiError,
     model::{Profile, Register, User},
-    response::PostResponse,
-    response::{GeneralResponse, Status},
+    response::{ApiError, GeneralResponse, PostResponse, Status},
     schema::{CreatePostSchema, LikePostSchema, LoginUserSchema, RegisterUserSchema},
     AppState,
 };
@@ -16,12 +14,10 @@ use axum::{
     Extension, Json,
 };
 use serde_json::json;
-use serde_json::Value;
 use std::sync::Arc;
 use tower_sessions::Session;
 use uuid::Uuid;
 use validator::Validate;
-
 pub async fn login_user_handler(
     session: Session,
     State(data): State<Arc<AppState>>,
@@ -35,7 +31,7 @@ pub async fn login_user_handler(
     .fetch_optional(&data.db)
     .await
     .map_err(|_| ApiError::InternalServerError)?
-    .ok_or_else(|| ApiError::BadRequest("User does not exist".to_string()))?;
+    .ok_or_else(|| ApiError::Fail("user does not exist".to_string()))?;
 
     let is_valid = match PasswordHash::new(&user.password) {
         Ok(parsed_hash) => Argon2::default()
@@ -45,7 +41,7 @@ pub async fn login_user_handler(
     };
 
     if !is_valid {
-        return Err(ApiError::BadRequest("Password incorrect".to_string()));
+        return Err(ApiError::Fail("incorrect password".to_string()));
     }
 
     session
@@ -53,12 +49,8 @@ pub async fn login_user_handler(
         .await
         .map_err(|_| ApiError::InternalServerError)?;
 
-    let response: GeneralResponse<()> = GeneralResponse {
-        status: Status::Success,
-        message: "User logged in".to_string(),
-        data: None,
-    };
-
+    //WIERD FUNCTION
+    let response = GeneralResponse::new(Status::Success, "user registerd", None);
     Ok(Json(response))
 }
 
@@ -67,7 +59,7 @@ pub async fn logout_handler(session: Session) -> Result<impl IntoResponse, ApiEr
         .delete()
         .await
         .map_err(|_| ApiError::InternalServerError)?;
-    let response: GeneralResponse<()> = GeneralResponse {
+    let response: GeneralResponse = GeneralResponse {
         status: Status::Success,
         message: "User logged out".to_string(),
         data: None,
@@ -89,7 +81,7 @@ pub async fn register_user_handler(
 
     if let Some(exists) = user_exists {
         if exists {
-            return Err(ApiError::BadRequest("Username is taken".to_string()));
+            return Err(ApiError::Fail("username is taken".to_string()));
         }
     }
 
@@ -103,14 +95,13 @@ pub async fn register_user_handler(
 
     if let Some(exists) = email_exists {
         if exists {
-            return Err(ApiError::BadRequest("Email is taken".to_string()));
+            return Err(ApiError::Fail("Email is taken".to_string()));
         }
     }
 
-    if let Err(_) = body.validate() {
-        return Err(ApiError::BadRequest("Invalid email".to_string()));
+    if body.validate().is_err() {
+        return Err(ApiError::Fail("Email is not valid".to_string()));
     }
-
     let salt = SaltString::generate(&mut OsRng);
     let hashed_password = Argon2::default()
         .hash_password(body.password.as_bytes(), &salt)
@@ -147,7 +138,7 @@ pub async fn register_user_handler(
         .await
         .map_err(|_| ApiError::InternalServerError)?;
 
-    let response: GeneralResponse<()> = GeneralResponse {
+    let response: GeneralResponse = GeneralResponse {
         status: Status::Success,
         message: "User registerd".to_string(),
         data: None,
@@ -170,7 +161,7 @@ pub async fn create_post(
     .await
     .map_err(|_| ApiError::InternalServerError)?;
 
-    let response: GeneralResponse<()> = GeneralResponse {
+    let response: GeneralResponse = GeneralResponse {
         status: Status::Success,
         message: "Post created".to_string(),
         data: None,
@@ -183,13 +174,13 @@ pub async fn get_all_posts(
     State(data): State<Arc<AppState>>,
 ) -> Result<impl IntoResponse, ApiError> {
     let posts: Vec<PostResponse> = sqlx::query_as!(
-         PostResponse,
-        "SELECT 
-            posts.id AS post_id, 
-            users.username AS author, 
-            posts.title, 
-            posts.content,  
-            posts.created_at, 
+        PostResponse,
+        "SELECT
+            posts.id AS post_id,
+            users.username AS author,
+            posts.title,
+            posts.content,
+            posts.created_at,
             posts.updated_at,
             posts.author_id,
             profiles.photo AS author_pfp,
@@ -205,11 +196,10 @@ pub async fn get_all_posts(
     .fetch_all(&data.db)
     .await
     .map_err(|_| ApiError::InternalServerError)?;
-
-    let response: GeneralResponse<Vec<PostResponse>> = GeneralResponse {
+    let response: GeneralResponse = GeneralResponse {
         status: Status::Success,
         message: "All posts retrived".to_string(),
-        data: Some(posts),
+        data: Some(json!(posts)),
     };
     Ok(Json(response))
 }
@@ -229,7 +219,7 @@ pub async fn get_profile(
     let user_id = match user_id {
         Some(id) => id,
         _ => {
-            return Err(ApiError::NotFound("User not found".to_string()));
+            return Err(ApiError::Fail("User not found".to_string()));
         }
     };
 
@@ -247,14 +237,14 @@ pub async fn get_profile(
     let profile = match profile {
         Some(profile) => profile,
         None => {
-            return Err(ApiError::NotFound("Profile not found".to_string()));
+            return Err(ApiError::Fail("Profile not found".to_string()));
         }
     };
 
-    let response: GeneralResponse<Profile> = GeneralResponse {
+    let response: GeneralResponse = GeneralResponse {
         status: Status::Success,
         message: "Profile retrived".to_string(),
-        data: Some(profile),
+        data: Some(json!(profile)),
     };
     Ok(Json(response))
 }
@@ -267,10 +257,10 @@ pub async fn get_all_users(
         .await
         .map_err(|_| ApiError::InternalServerError)?;
 
-    let response: GeneralResponse<Vec<User>> = GeneralResponse {
+    let response: GeneralResponse = GeneralResponse {
         status: Status::Success,
         message: "All users retrived".to_string(),
-        data: Some(users),
+        data: Some(json!(users)),
     };
 
     Ok(Json(response))
@@ -326,7 +316,7 @@ pub async fn react_to_post(
     .await
     .map_err(|_| ApiError::InternalServerError)?;
 
-    let response: GeneralResponse<Value> = GeneralResponse {
+    let response: GeneralResponse = GeneralResponse {
         status: Status::Success,
         message: "Reaction Recorded".to_string(),
         data: Some(json!({
@@ -348,16 +338,14 @@ pub async fn delete_post(
         .await
         .map_err(|_| ApiError::InternalServerError)?;
     if user.id != post_uuid {
-        return Err(ApiError::Unauthorized(
-            "not authorized to delete post".to_string(),
-        ));
+        return Err(ApiError::Fail("not authorized to delete post".to_string()));
     }
     sqlx::query!("DELETE FROM posts WHERE id = $1", post_id)
         .execute(&data.db)
         .await
         .map_err(|_| ApiError::InternalServerError)?;
 
-    let response: GeneralResponse<()> = GeneralResponse {
+    let response: GeneralResponse = GeneralResponse {
         status: Status::Success,
         message: "Post delleted".to_string(),
         data: None,
@@ -367,7 +355,7 @@ pub async fn delete_post(
 }
 
 pub async fn is_logged_in() -> Result<impl IntoResponse, ApiError> {
-    let response: GeneralResponse<Value> = GeneralResponse {
+    let response: GeneralResponse = GeneralResponse {
         status: Status::Success,
         message: "User logged in".to_string(),
         data: Some(json!({

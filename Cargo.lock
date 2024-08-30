@@ -1982,6 +1982,7 @@ dependencies = [
  "axum-extra",
  "chrono",
  "dotenv",
+ "lazy_static",
  "serde",
  "serde_json",
  "sqlx",
