@@ -19,6 +19,7 @@ use time::Duration;
 use tower_http::{cors::CorsLayer, services::ServeDir};
 use tower_sessions::{Expiry, SessionManagerLayer};
 use tower_sessions_redis_store::{fred::prelude::*, RedisStore};
+use tower_http::trace::TraceLayer;
 
 #[allow(dead_code)]
 pub struct AppState {
@@ -70,13 +71,18 @@ async fn main() {
         .allow_credentials(true)
         .allow_headers([AUTHORIZATION, ACCEPT, CONTENT_TYPE]);
 
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
+
     let app = create_router(Arc::new(AppState {
         db: pool.clone(),
         env: config.clone(),
     }))
     .nest_service("/assets", ServeDir::new("./assets"))
     .layer(cors)
-    .layer(session_layer);
+    .layer(session_layer)
+    .layer(TraceLayer::new_for_http());
 
     println!("✅ Server started successfully");
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8000").await.unwrap();

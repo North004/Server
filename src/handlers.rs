@@ -18,6 +18,7 @@ use std::sync::Arc;
 use tower_sessions::Session;
 use uuid::Uuid;
 use validator::Validate;
+
 pub async fn login_user_handler(
     session: Session,
     State(data): State<Arc<AppState>>,
