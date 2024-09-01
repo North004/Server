@@ -5,6 +5,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{json, Value};
 use uuid::Uuid;
+use axum::extract::{rejection::JsonRejection, FromRequest, MatchedPath, Request, State};
+
 
 #[derive(Serialize)]
 pub struct PostResponse {
@@ -61,7 +63,23 @@ impl GeneralResponse {
 pub enum ApiError {
     Fail(String),
     InternalServerError,
+    JsonRejection(JsonRejection),
 }
+
+
+#[derive(FromRequest)]
+#[from_request(via(axum::Json), rejection(ApiError))]
+pub struct AppJson<T>(pub T);
+
+impl<T> IntoResponse for AppJson<T>
+where
+    axum::Json<T>: IntoResponse,
+{
+    fn into_response(self) -> Response {
+        axum::Json(self.0).into_response()
+    }
+}
+
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response<Body> {
@@ -72,6 +90,11 @@ impl IntoResponse for ApiError {
                 "Internal server error".to_string(),
                 Status::Error,
             ),
+            ApiError::JsonRejection(_) => {
+                (StatusCode::INTERNAL_SERVER_ERROR,
+                "invalid json".to_string(),
+                Status::Error)
+            }
         };
 
         let json_response = GeneralResponse {
@@ -85,5 +108,11 @@ impl IntoResponse for ApiError {
             .header("Content-Type", "application/json")
             .body(Body::from(json!(json_response).to_string()))
             .unwrap()
+    }
+}
+
+impl From<JsonRejection> for ApiError {
+    fn from(rejection: JsonRejection) -> Self {
+        Self::JsonRejection(rejection)
     }
 }

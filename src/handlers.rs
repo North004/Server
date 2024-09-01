@@ -1,7 +1,7 @@
 use crate::{
     model::{Profile, Register, User},
-    response::{ApiError, GeneralResponse, PostResponse, Status},
-    schema::{CreatePostSchema, LikePostSchema, LoginUserSchema, RegisterUserSchema},
+    response::{ApiError, GeneralResponse, PostResponse, Status,AppJson},
+    schema::{CreatePostSchema, LikePostSchema, LoginUserSchema, RegisterUserSchema, RegisterUserSchemaOptional},
     AppState,
 };
 use argon2::{
@@ -68,10 +68,25 @@ pub async fn logout_handler(session: Session) -> Result<impl IntoResponse, ApiEr
     Ok(Json(response))
 }
 
+
 pub async fn register_user_handler(
     State(data): State<Arc<AppState>>,
-    Json(body): Json<RegisterUserSchema>,
+    AppJson(body): AppJson<RegisterUserSchemaOptional>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let username = body.username.ok_or_else(|| ApiError::Fail("Missing field username".to_string()))?;
+    let email = body.email.ok_or_else(|| ApiError::Fail("Missing field email".to_string()))?;
+    let password = body.password.ok_or_else(|| ApiError::Fail("Missing field password".to_string()))?;
+    if username == "".to_string() {
+        return Err(ApiError::Fail("Missing field username".to_string()));
+    }
+    if email == "".to_string() {
+        return Err(ApiError::Fail("Missing field email".to_string()));
+    }
+    if password == "".to_string() {
+        return Err(ApiError::Fail("Missing field password".to_string()));
+    }
+
+    let body = RegisterUserSchema { username,email,password};
     let user_exists: Option<bool> = sqlx::query_scalar!(
         "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)",
         body.username.to_owned()
